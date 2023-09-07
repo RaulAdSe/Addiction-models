@@ -1,0 +1,105 @@
+clear;clc;close all;
+% Runs 1808
+
+nS = 5;
+nA = 2;
+
+days = 50;
+NT = 500;
+NTC = 350;
+beta_plus = 2e-4;
+beta_minus = 1e-3;
+alpha_plus = 
+alpha:
+Q_0 = zeros(nS,nA);       % pairs of state action values
+r_bar_0 = 0;
+
+as_all = [];
+ss_all = [];
+r_all = [];
+r_bar_all = [];
+delta_all = [];
+Vs_all = zeros(NT*days,nS,nA);
+
+
+for i = 1:days
+%         fprintf('day %d\n', i)
+        [ss,as,r,delta,Vs,r_bar] = ex1808_fun(NTC,r_bar_0,Q_0,beta_plus,beta_minus);
+        as_all = [as_all as(1:end-1)];
+        ss_all = [ss_all ss(1:end-1)];
+        r_all = [r_all r(1:end-1)];
+        r_bar_all = [r_bar_all r_bar(1:end-1)];
+        Vs_all(1 + (i-1)*NT:i*NT,:,:) = Vs(1:end-1,:,:);
+        delta_all = [delta_all delta(1:end-1)];
+        
+        r_bar_0 = r_bar(end-1);
+        Q_0(1,:) = Vs(end-1,1,:);
+        Q_0(2,:) = Vs(end-1,2,:);
+        
+end
+
+ss_c = ss_all(:);
+as_c = as_all(:);
+r_bar_c = r_bar_all(:);
+delta_c = delta_all(:);
+r_c = r_all(:);
+
+figure;
+subplot(3, 1, 1);
+plot(find(ss_c == nS), delta_c(ss_c == nS));
+hold on
+plot(find(ss_c == 1 & as_c == 1), delta_c(ss_c == 1 & as_c == 1));% hold on
+% plot(setdiff([1:NT-1], union(ss(1:end-1) == 4,ss(1:end-1) == 1 & as(1:end-1) == 1)), delta(setdiff([1:NT-1], union(ss(1:end-1) == 4,ss(1:end-1) == 1 & as(1:end-1) == 1))));
+xlabel('Time steps');
+ylabel('Delta');
+legend('Bounded common state (N)','Drug intakes')
+grid on;
+
+subplot(3, 1, 2);
+plot(r_bar_c);
+xlabel('Time steps');
+ylabel('Mean reward');
+title('Mean reward');
+grid on;
+
+% Set the chunk size
+chunk_size = NT;
+% Calculate the number of chunks
+num_chunks = numel(r_c) / chunk_size;
+% Initialize a vector to store the counts
+chunk_counts = zeros(round(num_chunks), 1);
+
+% Loop through the chunks
+for chunk_idx = 1:num_chunks
+    start_idx = (chunk_idx - 1) * chunk_size + 1;
+    end_idx = chunk_idx * chunk_size;
+    % Count the number of ones in the current chunk
+    chunk_counts(chunk_idx) = sum(r_c(start_idx:end_idx));
+end
+subplot(3, 1, 3);
+bar(chunk_counts);
+ylabel('Number of Ones');
+title('Number of Rewards each Day');
+
+figure;
+
+% Define the number of rows and columns for the subplot grid
+num_rows = 3; % Define the number of rows
+num_cols = ceil(nS / num_rows); % Calculate the number of columns
+
+for s = 1:nS
+    subplot(num_rows, num_cols, s); % Use the subplot grid layout
+    Q_values = squeeze(Vs_all(:, s, :));
+    plot(Q_values);
+    xlabel('Time steps');
+    ylabel('Q Value');
+    title(['State ' num2str(s)]); % Add a title with the state number
+    grid on;
+end
+legend('Action 1', 'Action 2'); % Update with actual action labels
+
+
+% Adjust spacing between subplots
+subplot_adjust = get(gcf, 'Position');
+subplot_adjust(4) = subplot_adjust(4) - 005;
+set(gcf, 'Position', subplot_adjust)
