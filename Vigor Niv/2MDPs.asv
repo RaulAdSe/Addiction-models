@@ -1,0 +1,159 @@
+clear; close all;
+
+NT = 100000;
+nS = 2;
+nA = 2;
+nL = 50;
+
+beta_initial = 0;  % Initial low beta
+beta_final = 100;    % Target beta
+anneal_steps = round(NT-2); % Number of steps to anneal beta
+
+Q_0 = zeros(nS,nA);       % pairs of state action values
+r_bar_0 = 0;
+
+latencies = [1:0.1:5];   % Indexes and values are going to be the same
+T = zeros(nS,nS,nA,nL);
+Ur = zeros(nS,nA);
+Ur(1,1) = 1;
+reinforcement_schedule = zeros(nS,nA,nL);  % Define probability of reward for each (state, action, latency) triplet
+reinforcement_schedule(1,1,:) = 1;
+Cu = zeros(nA);
+Cv = zeros(nA);
+Cu(1) = 0.25; Cu(2) = 0; 
+Cv(1) = 0.25; Cv(2) = 0;
+
+% No unit cost and no switching cost
+
+ss = zeros(NT + 1, 1);
+ss(1) = 1;
+r = zeros(NT, 1);
+r_bar = zeros(NT + 1, 1);
+r_bar(1) = r_bar_0;
+as = zeros(NT + 1, 1);
+ls = zeros(NT + 1, 1);
+delta = zeros(NT + 1, 1);
+Q = zeros(nA,nS,nL);
+Vs = zeros(NT + 1,1);
+Qs = zeros(NT + 1,nA,nL);
+
+as(1) = 2;
+ss(1) = 2;
+as(2) = 2;
+ls(2) = 3;
+ss(2) = 1;
+storing = zeros(NT + 1,1);
+
+for t = 2:NT
+    
+    % Calculate current beta using linear annealing
+    current_beta = beta_initial + (beta_final - beta_initial) * min(t / anneal_steps, 1);
+
+    % Compute the softmax logits
+    logits = Q(:,ss(t),:).* current_beta;
+    max_logit = max(logits(:));  % Find the maximum logit value
+
+    % Compute the softmax probabilities using the log-sum-exp trick
+    ps = exp(logits - max_logit);  % Subtracting max_logit for numerical stability
+    ps = ps ./ sum(ps(:));
+
+    % Select action according to softmax
+    action_idx = find(rand() < cumsum(ps(:)), 1);  % Find the index where the cumulative sum exceeds a random value
+
+    % Convert the action index back to (action, latency) pair
+    [action, latency_idx] = ind2sub([nA, nL], action_idx);
+    as(t) = action;
+    ls(t) = latencies(latency_idx);
+    
+    % States manual change
+    if ss(t) == 1
+        ss(t+1) = 2;
+    else
+        ss(t+1) = 1;
+    end
+    % Calculate the action value
+    if ss(t) == 1
+        % Calculate the expected reward
+        expected_reward = reinforcement_schedule(ss(t), as(t), latency_idx) * Ur(as(t));
+        % Calculate costs based on Cu and Cv
+        cost = Cu(as(t)) + Cv(as(t)) / ls(t) + r_bar(t) * ls(t);
+        Q(as(t),ss(t),latency_idx) = expected_reward - cost + 0;
+        storing(t) = storing(t-1) + Ur(ss(t),as(t)) - cost;
+    else
+        Q(:,2,:) = 0;
+        storing(t) = storing(t-1);
+        Q_state_1 = Q(:,1,:);
+        Vs(t) = max(Q_state_1(:));
+    end
+    
+    r_bar(t+1) = storing(t)/t;
+    Qs(t,:,:) = Q(:,1,:);
+    
+end
+
+% Create a single figure with two subplots for 'Vs' and 'r_bar'
+figure;
+indx_ss2 = find(ss(1:end-1) == 2);
+% Create the first subplot for 'Vs'
+subplot(2, 1, 1);  % 2 rows, 1 column, first subplot
+plot(indx_ss2, Vs(indx_ss2));
+xlabel('Time steps');
+ylabel('V(S=1)');
+
+
+% Create the second subplot for 'r_bar'
+subplot(2, 1, 2);  % 2 rows, 1 column, second subplot
+plot(r_bar(1:end-1));
+xlabel('Time steps');
+ylabel('Mean reward');
+
+% Adjust spacing between subplots
+spacing = 0.04;
+position = get(gcf, 'Position');
+position(3) = position(3) + spacing;
+set(gcf, 'Position', position);
+
+% Define your data
+rew_indx = find(as(1:end-1) == 1 & ss(1:end-1) == 1);
+others_indx = find(as(1:end-1) == 2 & ss(1:end-1) == 1);
+% Create a single figure with two subplots
+figure;
+% Create the first subplot for 'rew_indx'
+bar(ls(rew_indx));
+yticks(latencies(1:10:end));
+xlabel('Reward action');
+ylabel('Vigor');
+
+% Adjust spacing between subplots
+spacing = 0.04;
+position = get(gcf, 'Position');
+position(3) = position(3) + spacing;
+set(gcf, 'Position', position);
+
+% Create a single figure with all subplots
+% figure;
+% for action = 1:nA
+%     for latency = 1:nL
+%         subplot(nA, nL, (action - 1) * nL + latency);  % Create a subplot grid
+%         plot(squeeze(Qs(1:end-1, action, latency)));
+%         title(['A ', num2str(action), ', L ', num2str(latencies(latency))]);
+%         xlabel('Time Step');
+%         ylabel('Q-Value');
+%         ylim([0 1]);  % Set y-axis limits to 0 and 1
+%     end
+% end
+
+figure;
+for latency = 1:nL
+    scatter(latencies(latency), Qs(end-1, 1, latency));
+    hold on
+end
+xlabel('Latency');
+ylabel('Q*-Value');
+
+
+figure()
+plot(storing(1:end-1))
+xlabel('Time steps');
+ylabel('Rewards - Costs');
+
