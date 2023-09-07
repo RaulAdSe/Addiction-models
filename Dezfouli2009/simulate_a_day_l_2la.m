@@ -1,0 +1,168 @@
+function [as, ss, r, r_e, r_bar, kappa, delta, Vs, Q] = simulate_a_day_l_2la(NT, Q, kappa_o, r_bar_o)
+
+% 2 step look ahead strategy
+
+% length_sess = 1;
+
+% Time variables
+% t_step = 1080; % each point of time is 4 seconds
+% NT = (24*60*60)/t_step; % number of time steps (24 hours)
+% NTC = (length_sess*60*60)/t_step; % number of time steps in which cocaine is available
+
+NTC = NT;
+
+% Constants
+Ds = 15;
+alpha = 0.2;
+lambd = 0.0003;
+N = 2;
+epsi = 0.1;
+sigma = 0.005;
+mu_N = 5;
+sigma_N = 0.02;
+mu_fr = -2;
+sigma_fr = 0.02;
+mu_sh = -200;
+sigma_sh = 0.02;
+mu_c = 2;
+sigma_c = 0.02;
+mu_s = 1;
+sigma_s = 0.02;
+mu_l = 15;
+sigma_l = 0.02;
+
+nS = 5;         % number of states
+nA = 3;         % number of actions: 1=OTH (other), 2=ILP (inactive lever), 3=ALP (active lever)
+OTH = 1;    ILP = 2;    ALP = 3;
+cost = 1;       % cost of pressing the lever
+
+ss = zeros(NT+1,1); ss(1) = 1; % external state
+r = zeros(NT+1,1);       % reward r 
+% r_c = zeros(NT+1,1);     % reward under cocaine influence
+r_e = zeros(NT+1,1);      % experienced reward
+r_bar = zeros(NT+1,1);  r_bar(1) = r_bar_o; % average reward at time t
+as  = zeros(NT+1,1);     % actions taken
+delta  = zeros(NT+1,1);  % reward prediciton error
+% delta_c  = zeros(NT+1,1);  % reward prediciton error
+% Q = zeros(nS,nA);       % pairs of state action values
+kappa = zeros(NT+1,1);  kappa(1) = kappa_o; % abnormal baseline elevation
+rho = zeros(NT+1,1);    rho(1) = kappa(1) + r_bar(1); % new r bar
+Vs = zeros(NT+1,nA);     % stores the value of drug event
+
+T = zeros(nS,nS,nA);        % true transition model 
+T(:,:,OTH) = [1 0 0 0 0; 0 0 1 0 0; 0 0 0 1 0; 0 0 0 0 1; 1 0 0 0 0]'; % col=s(t), row=s(t+1)
+T(:,:,ILP) = T(:,:,OTH);
+T(:,:,ALP) = T(:,:,ILP);
+T(:,1,ALP) = [0 1 0 0 0]';  % the only difference for ALP, is that choosing it in state 1 leads to transition to 2
+R = zeros(nS, nA);          % Reward matrix
+
+% sometimes the T and R matrixes are called the action-state graph
+R(:,2:3) = -cost;
+
+for t = 1:NT
+        
+%     if t>NTC
+%         R(1,3) =  - cost; % if cocaine is no longer available
+%     else
+    R(1,3) = reward(mu_c,sigma_c) - cost;
+    R(2,1) = 0;
+    R(2,2:3) = -cost;
+    
+%     if t>1 && ss(t-1) == 1 && as(t-1) == 3  % downside. The animal has taken the drug just before
+%         R(2,:) = R(2,:) - reward(mu_c,sigma_c);
+%     end
+%     end
+
+    % Choose the next action using the epsilon-greedy algorithm, and derive the next state
+    
+    % Simulate two-step lookahead for each action
+    lookahead_values = zeros(1, nA);
+    for a = 1:nA
+        % Simulate the environment's response for the current action (one step ahead)
+        next_state_lookahead1 = find(T(:, ss(t), a));
+        immediate_reward1 = R(ss(t), a);
+        
+        % Estimate the value of the first new state after one step lookahead
+        V_lookahead1 = max(Q(next_state_lookahead1, :));
+        
+        % One should now temporaly update the kappa, delta, Q, r_e and r_bar
+        if ss(t) == 1 && a == 3
+            kappa1 = (1 - lambd) * kappa(t) + lambd * N;
+            delta1 = max(R(ss(t), a) + V_lookahead1 - Q(ss(t), a) + Ds - kappa(t), Ds - kappa(t)) - r_bar(t);
+        else
+            kappa1 = (1 - lambd) * kappa(t);
+            delta1 = R(ss(t), a) + V_lookahead1 - Q(ss(t), a) - kappa(t) - r_bar(t);
+        end
+        Q1 = Q;
+        Q1(ss(t),a) = Q(ss(t),a) + delta1 * alpha; % learning is proportional to delta
+        r_e1 = delta1 - V_lookahead1 + Q(ss(t), a) + r_bar(t) + kappa1;  % only want to compute it in order to update r_bar
+        r_bar1 = (1 - sigma) * r_bar(t) + sigma * r_e1;
+
+        
+        % Simulate the environment's response for each action at the first new state (two steps ahead)
+        lookahead_values2 = zeros(1, nA);
+        for a2 = 1:nA
+            % Simulate the environment's response for the current action at the first new state
+            next_state_lookahead2 = find(T(:, next_state_lookahead1, a2));
+            immediate_reward2 = R(next_state_lookahead1, a2);
+            
+            % Estimate the value of the second new state after one step lookahead
+            V_lookahead2 = max(Q1(next_state_lookahead2, :));
+            
+            % Calculate the total value with two-step lookahead
+            lookahead_values2(a2) = immediate_reward2 + V_lookahead2;
+        end
+        
+        % Choose the best action at the second new state based on one-step lookahead
+        chosen_action2 = find(lookahead_values2 == max(lookahead_values2));
+        
+        % Calculate the total value with two-step lookahead
+        lookahead_values(a) = immediate_reward1 + V_lookahead1 + lookahead_values2(chosen_action2);
+    end
+    
+    chosen_action = find(lookahead_values == max(lookahead_values));
+    if length(chosen_action)>1
+        chosen_indx = randi([1 length(chosen_action)]);
+        chosen_action = chosen_action(chosen_indx);
+    end
+    % Apply epsilon-greedy exploration
+    exploratory = false;
+    if numel(Q(ss(t),:)) >= 2 && rand() < epsi
+        exploratory = true;
+        chosen_action = randi(numel(Q(ss(t), :)));
+    end
+    
+    as(t) = chosen_action;
+
+    % this line is not working
+    ss(t + 1) = find(T(:, ss(t), as(t)));
+    r(t) = R(ss(t), as(t));
+    
+    V = max(Q(ss(t+1),:));
+
+    
+    if ss(t) == 1 && as(t) == 3
+        kappa(t + 1) = (1 - lambd) * kappa(t) + lambd * N;
+        delta(t) = max(R(ss(t), as(t)) + V - Q(ss(t), as(t)) + Ds - kappa(t), Ds - kappa(t)) - r_bar(t);
+    else
+        kappa(t + 1) = (1 - lambd) * kappa(t);
+        delta(t) = R(ss(t), as(t)) + V - Q(ss(t), as(t)) - kappa(t) - r_bar(t);
+    end
+    
+    Q(ss(t),as(t)) = Q(ss(t),as(t)) + delta(t) * alpha; % learning is proportional to delta
+    Vs(t,:) = Q(1,:);
+    
+    r_e(t) = delta(t) - V + Q(ss(t), as(t)) + r_bar(t) + kappa(t);  % only want to compute it in order to update r_bar
+                                                                         
+    if exploratory  % average reward is computed over nonexplanatory actions
+        r_bar(t + 1) = r_bar(t);
+    else
+        r_bar(t + 1) = (1 - sigma) * r_bar(t) + sigma * r_e(t);
+    end
+end
+    
+
+% instead of having 2 deltas I should only have 1!!!!
+% in the same way, only one experienced reward!
+
+

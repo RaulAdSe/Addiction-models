@@ -1,0 +1,376 @@
+clear; clc; close all
+
+% Slightly changed it so we can understand a little more. 
+% 2 actions, other that does nothing and an active leaver that advances
+% state. Only in state 1 recieves cocaine.
+
+NT = 2000;
+NTC = 500;
+
+% Constants
+Ds = 15;
+beta = 0.2; % Learn mean rewards faster than Q values.
+alpha = 0.1;
+epsi = 0.1;
+mu_c = 2;
+sigma_c = 0.02;
+
+
+% Transition and Reward Matrices
+nS = 2;         % number of states
+nA = 2;         % number of actions: 1=OTH (other), 2=ILP (inactive lever), 3=ALP (active lever)
+
+T = zeros(nS, nS, nA);
+T(:, :, 1) = [0,1;1,0];
+T(:, :, 2) = [1,0;0,1];
+
+R = zeros(nS, nA);
+R(1,1) = reward(mu_c,sigma_c)-1;
+R(2,1) = -1;
+
+
+% Variables
+ss = zeros(NT + 1, 1);
+ss(1) = 1;
+r = zeros(NT + 1, 1);
+r_c = zeros(NT + 1, 1);
+r_bar = zeros(NT + 1, 1);
+r_bar(1) = 0;
+as = zeros(NT + 1, 1);
+delta_c_c = zeros(NT + 1, 1);
+Q = zeros(nS,nA);
+Vs = zeros(NT + 1, nS,nA);
+plt = zeros(NT + 1, 1);
+
+% Simulation
+for t = 1:NT
+   
+    exploratory = false;
+    if rand() < epsi
+        exploratory = true;
+        as(t) = randi(numel(Q(ss(t), :)));
+    else
+        value_dict = zeros(1, nA);  % store estimated values of diferent actions in current sate
+        for a = 1:nA
+            value_dict(a) = Q(ss(t),a);
+        end
+        [~, max_idx] = max(value_dict);
+        as(t) = max_idx;
+    end
+    
+    if t < NTC
+        R(1,1) = reward(mu_c,sigma_c)-1;
+    else
+        R(1,1) = -1;
+    end
+
+    ss(t + 1) = find(T(:, ss(t), as(t)));
+    r(t) = R(ss(t), as(t));
+    
+    V = max(Q(ss(t+1),:));
+        
+%     if as(t) == 1 && ss(t) == 1 
+    if t < NTC && as(t) == 1 && ss(t) == 1 
+        delta_c_c(t) = max(r(t) + V - Q(ss(t), as(t)) + Ds, Ds) - r_bar(t);
+        
+    else
+        delta_c_c(t) = r(t) + V - Q(ss(t), as(t)) - r_bar(t);
+    end
+    
+    if exploratory
+        r_bar(t + 1) = r_bar(t);
+    else
+        r_bar(t + 1) = r_bar(t + 1) + beta * delta_c_c(t);
+    end
+
+    Q(ss(t),as(t)) = Q(ss(t),as(t)) + alpha * delta_c_c(t);
+        
+    plt(t) = V;
+    
+    Vs(t,:,:) = Q(:,:);
+end
+
+figure()
+hold on
+num_panels = 10;
+num_rows = 2;
+%
+subplot(2,num_panels/num_rows,1)
+hold on
+for a = 1:nA
+    plot([1:NT], Vs(1:end-1,1,a));
+    hold on
+end
+xlabel('Time steps');
+ylabel('Action value in state 1');
+legend('AL','OTH');
+
+%
+subplot(2,num_panels/num_rows,2)
+hold on
+% Initialize variables for plotting
+num_elements = NT;
+count = [];
+
+% Loop through the data in chunks of 100 elements
+for i = 1:100:num_elements
+    chunk_end = min(i + 99, num_elements);
+    chunk_as = as(i:chunk_end);
+    chunk_ss = ss(i:chunk_end);
+
+    % Count elements that satisfy the condition
+    condition_count = sum(chunk_as == 1 & chunk_ss == 1);
+
+    % Store count and x value
+    count = [count, condition_count];
+end
+
+% Plot the count
+plot(count, 'o-');
+xlabel('Chunk Number');
+ylabel('Drug intake events');
+%
+% subplot(2,num_panels/num_rows,3)
+% hold on
+% plot([1:NT],kappa(1:end-1));
+% xlabel('Time steps'), ylabel('Kappa')
+% %
+
+drugindx = find(ss(:) == 1 & as(:) == 1);
+% punishindx = drugindx + 1;
+% otherindx = setdiff(1:NT, union(drugindx, punishindx));
+otherindx = setdiff(1:NT,drugindx);
+
+
+subplot(2,num_panels/num_rows,4)
+hold on
+plot(drugindx,r_bar(drugindx));
+hold on
+% plot(punishindx,r_bar(punishindx));
+% hold on
+plot(otherindx,r_bar(otherindx));
+% plot(r_bar(:));
+xlabel('Time steps'), ylabel('Mean reward')
+legend('Drug','Other')
+%
+
+subplot(2,num_panels/num_rows,5)
+% Generate data for testing (you can replace this with your actual data)
+num_elements = NT;
+% Initialize variables for calculations and plotting
+chunk_size = 100;
+num_chunks = ceil(num_elements / chunk_size);
+mean_time_diffs = zeros(num_chunks, 1);
+
+% Loop through the data in chunks
+for i = 1:num_chunks
+    chunk_start = (i - 1) * chunk_size + 1;
+    chunk_end = min(i * chunk_size, num_elements);
+
+    chunk_as = as(chunk_start:chunk_end);
+    chunk_ss = ss(chunk_start:chunk_end);
+
+    % Find indices of events satisfying the condition
+    event_indices = find(chunk_as == 1 & chunk_ss == 1);
+
+    % Calculate time differences between consecutive events
+    event_diffs = diff(event_indices);
+
+    % Calculate the mean time difference for the chunk
+    mean_time_diffs(i) = mean(event_diffs);
+end
+
+% Plot the mean time differences for each chunk
+plot(mean_time_diffs,'o-');
+xlabel('Chunk Number');
+ylabel('Mean IDI');
+%
+
+% subplot(2,num_panels/num_rows,6)
+% hold on
+% plot(drugindx,r_c(drugindx));
+% hold on
+% % plot(punishindx,r_c(punishindx));
+% % hold on
+% plot(otherindx,r_c(otherindx));
+% % plot(r_bar(:));
+% xlabel('Time steps'), ylabel('Experienced reward')
+% legend('Drug','Other')
+
+%
+% plot(otherindx,r_c(otherindx));
+
+% xlabel('Time steps')
+% ylabel('Experienced reward')
+% legend('Drug','No drug')
+%
+%     subplot(2,num_panels/num_rows,7)
+%     hold on
+%     plot([1:NT],delta_c_c(1:end-1));
+%     xlabel('Time steps'), ylabel('RPE under cocaine')
+
+subplot(2,num_panels/num_rows,7)
+hold on
+plot(drugindx, delta_c_c(drugindx));
+ylabel('RPE drug')
+xlabel('Time steps')
+%
+subplot(2,num_panels/num_rows,8)
+hold on
+% plot(punishindx,delta_c_c(punishindx));
+% hold on
+plot(otherindx,delta_c_c(otherindx));
+ylabel('RPE no drug')
+xlabel('Time steps')
+
+
+subplot(2,num_panels/num_rows,9)    % Action dynamics
+hold on
+
+% Set the chunk size and number of chunks
+chunk_size = 100;
+num_chunks = floor(numel(as) / chunk_size);
+
+% Initialize action counts for each chunk
+action_counts = zeros(num_chunks, 3);
+
+% Count actions in each chunk
+for chunk = 1:num_chunks
+    chunk_indices = (chunk - 1) * chunk_size + 1 : chunk * chunk_size;
+    chunk_as = as(chunk_indices);
+    action_counts(chunk, 1) = sum(chunk_as == 1);
+    action_counts(chunk, 2) = sum(chunk_as == 2);
+end
+
+% Plot the action counts for each chunk
+plot(action_counts);
+xlabel('Chunk Number');
+ylabel('Action Counts');
+legend('AL', 'OTH');
+
+subplot(2,num_panels/num_rows,10)    % State dynamics
+hold on
+% Set the chunk size and number of chunks
+chunk_size = 100;
+num_chunks = floor(numel(ss) / chunk_size);
+
+% Initialize state visit counts for each chunk
+state_counts = zeros(num_chunks, nS);
+
+% Count state visits in each chunk
+for chunk = 1:num_chunks
+    chunk_indices = (chunk - 1) * chunk_size + 1 : chunk * chunk_size;
+    chunk_ss = ss(chunk_indices);
+    for state = 1:nS
+        state_counts(chunk, state) = sum(chunk_ss == state);
+    end
+end
+
+% Plot the state visit counts for each chunk
+plot(state_counts);
+xlabel('Chunk Number');
+ylabel('State Visit Counts');
+legend('State 1', 'State 2');
+
+    
+figure();
+for value = 1:nS
+    subplot(2, 3, value); % Adjust subplot dimensions as needed
+    chunk_size = 100;
+    num_chunks = floor(numel(ss) / chunk_size);
+    actionsCountPerDay = zeros(num_chunks, nA);
+
+    for chunk = 1:num_chunks
+        chunk_indices = (chunk - 1) * chunk_size + 1 : chunk * chunk_size;
+        chunk_ss = ss(chunk_indices);
+        chunk_as = as(chunk_indices);
+        stateValueIndicesDay = find(chunk_ss(:) == value);
+        for action = 1:nA
+            actionsCountPerDay(chunk, action) = sum(chunk_as(stateValueIndicesDay) == action);
+        end
+    end
+
+    plot(actionsCountPerDay, 'o-');
+    xlabel('Chunk Number');
+    ylabel('Action Counts');
+    title(['State ', num2str(value)]);
+end
+    legend('AL', 'OTH');
+    
+
+% Create a figure for the 2x2 grid
+figure;
+
+% Plotting the first subplot (top-left)
+subplot(2, 2, 1);
+for a = 1:nA
+    plot([1:NT], Vs(1:end-1, 1, a));
+    hold on;
+end
+xlabel('Time steps');
+ylabel('Action value in state 1');
+legend('AL', 'OTH');
+
+% Plotting the second subplot (top-right)
+subplot(2, 2, 2);
+state_1_nodrug = find(ss(:) == 1 & as(:) ~= 1);
+state_others = find(ss(:) == 1 & as(:) == 1);
+plot(state_1_nodrug, delta_c_c(state_1_nodrug));
+hold on;
+plot(state_others, delta_c_c(state_others));
+xlabel('Time steps');
+ylabel('RPE on state 1');
+legend('No drug', 'Drug');
+
+% Plotting the third subplot (bottom-left)
+subplot(2, 2, 3);
+for a = 1:nA
+    plot([1:NT], Vs(1:end-1, 2, a));
+    hold on;
+end
+xlabel('Time steps');
+ylabel('Action value in state 2');
+legend('AL', 'OTH');
+
+% Plotting the fourth subplot (bottom-right)
+subplot(2, 2, 4);
+state_1_nodrug = find(ss(:) == 2 & as(:) ~= 1);
+state_others = find(ss(:) == 2 & as(:) == 1);
+plot(state_1_nodrug(1:end-1), delta_c_c(state_1_nodrug(1:end-1)));
+hold on;
+plot(state_others, delta_c_c(state_others));
+xlabel('Time steps');
+ylabel('RPE on state 2');
+legend('OTH', 'AL');
+
+% Create a new figure with subplots
+figure;
+
+% First subplot
+subplot(1,2,1);
+state_1_nodrug = find(ss(:) == 1 & as(:) ~= 1);
+state_drug = find(ss(:) == 1 & as(:) == 1);
+plot(state_1_nodrug(1:end-1), plt(state_1_nodrug(1:end-1)));
+hold on;
+plot(state_drug, plt(state_drug));
+hold on;
+% xline(state_1_nodrug(1), '--r', 'Label', ['x = ', num2str(state_1_nodrug(1))]);
+xlabel('Time steps');
+ylabel('V(s_{t+1}) on state 1');
+legend('OTH', 'AL');
+
+% Second subplot
+subplot(1,2,2);
+state_2_oth = find(ss(:) == 2 & as(:) ~= 1);
+state_2_a = find(ss(:) == 2 & as(:) == 1);
+plot(state_2_oth(1:end-1), plt(state_2_oth(1:end-1)));
+hold on;
+plot(state_2_a, plt(state_2_a));
+hold on;
+% xline(state_2_oth(1), '--r', 'Label', ['x = ', num2str(state_2_oth(1))]);
+xlabel('Time steps');
+ylabel('V(s_{t+1}) on state 2');
+legend('OTH', 'AL');
+
+
+

@@ -1,0 +1,74 @@
+% Time steps
+t_step = 40;
+
+% Constants
+T = 10;
+Ds = 15;
+alpha = 0.2;
+lambd = 0.0003;
+N = 2;
+epsi = 0.1;
+sigma = 0.005;
+nS = 5;         % number of states
+nA = 3;         % number of actions: 1=OTH (other), 2=ILP (inactive lever), 3=ALP (active lever)
+
+% Variables
+NT = 24 * 60 * 60 / t_step;
+% NTC = T * 60 * 60 / t_step;
+ss = zeros(NT + 1, 1);
+ss(1) = 1;
+r = zeros(NT + 1, 1);
+r_c = zeros(NT + 1, 1);
+r_bar = zeros(NT + 1, 1);
+r_bar(1) = 0;
+as = zeros(NT + 1, 1);
+delta = zeros(NT + 1, 1);
+delta_c = zeros(NT + 1, 1);
+Q = zeros(nS,nA);
+kappa = zeros(NT + 1, 1);
+kappa(1) = 0;
+rho = zeros(NT + 1, 1);
+rho(1) = kappa(1);
+
+% Simulation
+for t = 1:NT
+
+    exploratory = false;
+    if numel(Q(ss(t))) >= 2 && rand() < epsi
+        exploratory = true;
+        as(t) = randi(numel(Q(ss(t), :)));
+    else
+        value_dict = zeros(1, length(S{ss(t)}));
+        for a = 1:length(S{ss(t)})
+            value_dict(a) = Q(ss(t),a);
+        end
+        [~, max_idx] = max(value_dict);
+        as(t) = max_idx;
+    end
+
+    [~, ss(t + 1)] = find(T(:, ss(t), as(t)));
+    r(t) = R(ss(t), as(t));
+    
+    V = max(Q(ss(t)));
+    
+    if t < NTC && as(t) == 1 && ss(t) == 3
+        kappa(t + 1) = (1 - lambd) * kappa(t) + lambd * N;
+    else
+        kappa(t + 1) = (1 - lambd) * kappa(t);
+    end
+    
+    rho(t) = r_bar(t) + kappa(t);
+    
+    delta_c(t) = max(R(ss(t), as(t)) + V - Q(ss(t), as(t)) + Ds - kappa(t), Ds - kappa(t)) - r_bar(t);
+    Q(ss(t),as(t)) = Q(ss(t),as(t)) + delta(t) * alpha;
+    
+    delta(t) = R(ss(t), as(t)) + V - Q(ss(t), as(t)) - rho(t);
+    
+    r_c(t) = delta_c(t) - V + Q(ss(t), as(t)) + rho(t);
+    
+    if exploratory
+        r_bar(t + 1) = r_bar(t);
+    else
+        r_bar(t + 1) = (1 - sigma) * r_bar(t) + sigma * r_c(t);
+    end
+end

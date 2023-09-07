@@ -1,0 +1,106 @@
+length_sess = 1;
+
+% Time variables
+t_step = 4; % each point of time is 4 seconds
+NT = (24*60*60)/t_step; % number of time steps (24 hours)
+NTC = (length_sess*60*60)/t_step; % number of time steps in which cocaine is available
+
+% Reward generating parameters
+mu_N = 5;
+sigma_N = 0.02;
+mu_fr = -2;
+sigma_fr = 0.02;
+mu_sh = -200;
+sigma_sh = 0.02;
+mu_c = 2;
+sigma_c = 0.02;
+mu_s = 1;
+sigma_s = 0.02;
+mu_l = 15;
+sigma_l = 0.02;
+
+% Variables
+% S             % action-state graph   
+T     = 10;     % total number of timesteps
+Ds    = 15;     % dopamine surge
+alpha = 0.2;    % learning rate
+lambd = 0.0003; % speed of deviation of kappa_t
+% C_u   = 6;
+N     = 2;      % maximum level of deviation
+epsi  = 0.1;    % epsilon-greedy action selection
+%k     = 7;     % 
+sigma = 0.005;  %
+
+nS = 5;         % number of states
+nA = 3;         % number of actions: 1=OTH (other), 2=ILP (inactive lever), 3=ALP (active lever)
+OTH = 1;    ILP = 2;    ALP = 3;
+
+ss = zeros(NT+1,1); ss(1) = 1; % external state
+r = zeros(NT+1,1);       % reward r (all will be under cocaine)
+% rc = zeros(NT+1,1);      % rewards r under cocain
+r_bar = zeros(NT+1,1);   % average reward at time t
+as  = zeros(NT+1,1);     % actions taken
+delta  = zeros(NT+1,1);  % reward prediciton error
+Q = zeros(nS,nA);       % pairs of state action values
+rho = zeros(NT+1,1);     % new r bar
+kappa = zeros(NT+1,1);   % abnormal baseline elevation
+
+T = zeros(nS,nS,nA);        % true transition model 
+T(:,:,OTH) = [1 0 0 0 0; 0 0 1 0 0; 0 0 0 1 0; 0 0 0 0 1; 1 0 0 0 0]'; % col=s(t), row=s(t+1)
+T(:,:,ILP) = T(:,:,OTH);
+T(:,:,ALP) = T(:,:,ILP);
+T(:,1,ALP) = [0 1 0 0 0]';  % the only difference for ALP, is that choosing it in state 1 leads to transition to 2
+R = zeros(nS, nA);          % Reward matrix
+
+
+% sometimes the T and R matrixes are called the action-state graph
+
+K = 0;       % cocaine availability      
+for t = 1:NT
+    
+    print(t)
+    
+    if t>NTC
+        K=0; % if cocaine is no longer available
+    end
+    
+    % Choose the next action using the epsilon-greedy algorithm, and derive the next state
+    
+    if numel(Q(s, :)) >= 2 && rand() < epsi
+        exploratory = true;
+        chosen_action_idx = randi(numel(Q(s, :)));
+    else
+        exploratory = false;
+        value_dict = zeros(1, nA);  % store estimated values of diferent actions in current sate
+        for a = 1:nA
+            value_dict(a) = R(s, a);
+        end
+        
+        [r_value, chosen_action] = max(value_dict);
+    end
+        
+    as(t) = chosen_action;
+    r(t) = r_value;
+    ss(t + 1) = T(s, chosen_action);    % in this RL algorithm agents do not learn T. Model-free
+    
+    % updates
+    V = max(Q(ss(t), :));   % update V
+    kappa(t + 1) = (1- lambd) * kappa(t) + lambd * kappa(t);    % update kappa
+    rho(t) = r_bar(t) + kappa(t);   % update rho
+    
+    % delta, always is going to be under the effect of cocaine
+    delta(t) = max(r_t + V - Q(ss(t),as(t)) + Ds - kappa(t), Ds - kappa(t)) - r_bar(t);
+    % reward
+    r(t) = delta(t) - V + Q(ss(t),as(t)) + rho(t);
+    
+    if exploratory
+        r_bar(t + 1) = r_bar(t);
+    else
+        r_bar(t + 1) = (1 - sigma) * r_bar(t) + sigma * r;
+    end
+end
+    
+% How can I set (s==1 & a==ALP) when t<NTC then more reward???
+
+
+
