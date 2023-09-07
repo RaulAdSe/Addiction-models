@@ -25,7 +25,3 @@ This repository contains the following key resources:
 - **Code**: The `code/` directory contains Python code used to implement RL models, simulate addiction dynamics, and conduct experiments.
 
 - **References**: The `references/` directory lists academic papers, articles, and books that were used as references and resources during the research.
-
-## Getting Started
-
-If you are interested in exploring the code and findings from this project, you can start by navigating the repository's directories. Detailed instructions for running specific experiments or simulations can be found in the code documentation.
